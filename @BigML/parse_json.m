@@ -104,7 +104,15 @@ function [data json] = parse_object(json)
                     ME = MException('json:parse_object',['Can not have an empty name: ' json]);
                     ME.throw;
                 end
-                data.(name) = value;
+                
+                % fix invalid field names, e.g. all numeric names
+                try
+                    data.(name) = value;
+                catch
+                    name = ['field_',name] ;
+                    data.(name) = value ;
+                end
+                
                 json = remaining_json;
                 
             case '}' % End of object, so exit the function

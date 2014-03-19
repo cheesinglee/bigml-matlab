@@ -106,7 +106,8 @@ classdef BigML
         function response = get_source(self,source)
             res = get_res_id(source) ;
             url = [self.url,res,self.auth] ;
-            response = urlread2(url,'GET') ;
+            response = parse_json(urlread2(url,'GET')) ;
+            response = response{1} ;
         end
         
         function response = create_local_source(self,file_name)
@@ -161,8 +162,19 @@ classdef BigML
                 params = {} ;
             end
             
+            timeout = 3 ;            
+            n_tries = 10 ;
+                      
+            n = 0 ;
+            while ~self.source_is_ready(source) 
+                pause(timeout) ;
+                n = n + 1 ;
+                if n >= n_tries
+                    error('Source not available, maximum tries exceeded') ;
+                end
+            end
+                        
             src_res = get_res_id(source) ;
-            
             params.source = src_res ;
             body = jsonify(params) ;
             disp(body) 
@@ -226,12 +238,12 @@ function res = get_res_id(r)
     if ischar(r)
         res = r ;
     elseif isstruct(r)
-        res = r.source ;
+        res = r.resource ;
     end
 end
 
 function ready = resource_is_ready(res)
-    
+   ready = (res.status.code == 5) ;
 end
 
 function quoted = quotify(s,single)
