@@ -23,6 +23,14 @@ classdef BigML
         EVALUATION_PATH = 'evaluation' ;
         ENSEMBLE_PATH = 'ensemble' ;
         BATCH_PREDICTION_PATH = 'batchprediction' ;
+        
+        SOURCE_RE = '^source/[a-f0-9]{24}$' ;
+        DATASET_RE = '^(public/)?dataset/[a-f0-9]{24}$' ;
+        MODEL_RE = '^(public/)?model/[a-f0-9]{24}$|^shared/model/[a-zA-Z0-9]{27}$' ;
+        PREDICTION_RE = '^prediction/[a-f0-9]{24}$' ;
+        ENSEMBLE_RE = '^ensemble/[a-f0-9]{24}$' ;
+        EVALUATION_RE = '^evaluation/[a-f0-9]{24}$' ;
+        BATCHPREDICTION_RE = '^batchprediction/[a-f0-9]{24}$' ;
 
         % HTTP Status Codes from https://bigml.com/developers/status_codes
         HTTP_OK = 200 ;
@@ -61,6 +69,8 @@ classdef BigML
         evaluation_url
         ensemble_url
         batch_prediction_url
+        timeout
+        n_tries
     end
     
     methods
@@ -70,6 +80,8 @@ classdef BigML
             p.addParamValue( 'username',getenv('BIGML_USERNAME'),@(x)ischar(x) ) ;
             p.addParamValue( 'apikey', getenv('BIGML_API_KEY'), @(x)ischar(x) ) ;
             p.addParamValue( 'devmode', false, @(x) islogical(x) ) ;
+            p.addParamValue( 'timeout', 3, @(x) isnumeric(x) && (x > 0)) ;
+            p.addParamValue( 'n_tries', 10, @(x) isnumeric(x) && (x > 0)) ;
 
             p.parse(varargin{:}) ;
             arglist = p.Results ;
@@ -91,6 +103,10 @@ classdef BigML
                 self.url = self.BIGML_URL ;
                 self.prediction_url = self.BIGML_PREDICTION_URL ;
             end
+            
+            % resource fetching parameters
+            self.timeout = arglist.timeout ;
+            self.n_tries = arglist.n_tries ;
 
             % Base Resource URLs
             self.source_url = [self.url, self.SOURCE_PATH] ;
@@ -124,8 +140,11 @@ classdef BigML
         end
 
         function response = create_remote_source(self,url,params)
-           params.remote = url ;
-           params.name = url ;
+            if ~exist('params','var')
+                params = containers.Map() ;
+            end
+           params('remote') = url ;
+           params('name') = url ;
            body = jsonify(params) ;
            disp(body)
 
@@ -139,8 +158,11 @@ classdef BigML
         end
 
         function response = create_inline_source(self,data,params)
+            if ~exist('params','var')
+                params = containers.Map() ;
+            end
             csv_data = self.struct_to_csv(data) ;
-            params.data = csv_data ;
+            params('data') = csv_data ;
             body = jsonify(params) ;
 
             header = http_createHeader('Content-Type',...
@@ -156,35 +178,357 @@ classdef BigML
             ready = resource_is_ready(source) ;
         end
         
+        function response = list_sources(self,params)
+            if ~exist('params','var')
+                params = containers.Map() ;
+            end
+            response = self.list_(self.source_url,params) ;
+        end
+        
+        function response = update_source(self,source,params)
+            if ~exist('params','var')
+                params = containers.Map() ;
+            end
+            response = self.update_(source,params) ;
+        end
+        
+        function response = delete_source(self,source)
+            response = self.delete_(source) ;
+        end
+        
+        function ok = check_source_id(resource)
+            resource = get_res_id(resource) ;
+            ok = ~isempty(regexp(resource,self.SOURCE_RE,'once')) ;
+        end
+        
         %%%%%%%%%%% Datasets %%%%%%%%%%%%
         function response = create_dataset(self,source,params)
             if ~exist('params','var')
-                params = {} ;
+                params = containers.Map() ;
             end
-            
-            timeout = 3 ;            
-            n_tries = 10 ;
                       
             n = 0 ;
             while ~self.source_is_ready(source) 
-                pause(timeout) ;
+                pause(self.timeout) ;
                 n = n + 1 ;
-                if n >= n_tries
+                if n >= self.n_tries
                     error('Source not available, maximum tries exceeded') ;
                 end
             end
                         
             src_res = get_res_id(source) ;
-            params.source = src_res ;
-            body = jsonify(params) ;
-            disp(body) 
-            header = http_createHeader('Content-Type',...
-                'application/json;charset=utf-8') ;
-            
-            response = urlread2([self.dataset_url,self.auth],'POST',body,header) ;
-
-            response = parse_json(response) ;
+            params('source') = src_res ;
+            response = self.urlpost_([self.dataset_url,self.auth],params) ;
+        end
+        
+        function response = get_dataset(self,dataset)
+            res = get_res_id(dataset) ;
+            url = [self.url,res,self.auth] ;
+            response = parse_json(urlread2(url,'GET')) ;
             response = response{1} ;
+        end
+        
+        function ready = dataset_is_ready(self,dataset)
+            dataset = self.get_dataset(dataset) ;
+            ready = resource_is_ready(dataset) ;
+        end
+        
+        function response = update_dataset(self,dataset,params)
+            if ~exist('params','var')
+                params = containers.Map() ;
+            end
+            response = self.update_(dataset,params) ;
+        end
+        
+        function response = delete_dataset(self,dataset)
+            response = self.delete_(dataset) ;
+        end
+        
+        function response = list_datasets(self,params)
+            if ~exist('params','var')
+                params = containers.Map() ;
+            end
+            response = self.list_(self.dataset_url,params) ;
+        end
+        
+        function response = transform_dataset(self,dataset,params)
+            if ~exist('params','var')
+                params = containers.Map() ;
+            end
+            res_id = get_res_id(dataset) ;
+            params('origin_dataset') = res_id ;
+            response = self.urlpost_([self.dataset_url,self.auth],params) ;   
+        end
+        
+        function response = create_multi_dataset(self,datasets,params)
+            if ~exist('params','var')
+                params = containers.Map() ;
+            end
+            if ~iscell(datasets)
+                error('origin datasets must be a cell array') ;
+            end
+            dataset_list = {} ;
+            for i = 1:length(datasets)
+                dataset_list = [dataset_list, get_res_id(datasets{i})] ;
+            end
+            params('origin_datasets') = dataset_list ;
+            
+            response = self.urlpost_([self.dataset_url,self.auth],params) ;
+        end
+        
+        function ok = check_dataset_id(resource)
+            resource = get_res_id(resource) ;
+            ok = ~isempty(regexp(resource,self.DATASET_RE,'once')) ;
+        end
+        
+        %%%%%%%% Models %%%%%%%%%%%%%
+        function response = create_model(self,dataset,params)
+            if ~exist('params','var')
+                params = containers.Map() ;
+            end
+            if iscell(dataset)
+                    dataset_list = {} ;
+                for i = 1:length(dataset)
+                    dataset_list = [dataset_list, get_res_id(dataset{i})] ;
+                end
+                params('datasets') = dataset_list ;
+            else
+                params('dataset') = get_res_id(dataset) ;
+            end
+            
+            url = [self.model_url,self.auth] ;
+            response = self.urlpost_(url,params) ;
+        end
+        
+        function response = get_model(self,model)
+            res = get_res_id(model) ;
+            url = [self.url,res,self.auth] ;
+            response = parse_json(urlread2(url,'GET')) ;
+            response = response{1} ;
+        end
+        
+        function response = delete_model(self,model)
+            response = self.delete_(model) ;
+        end
+        
+        function response = update_model(self,model,params)
+            if ~exist('params','var')
+                params = containers.Map() ;
+            end
+            response = self.update_(model,params) ;
+        end
+        
+        function response = list_models(self,params)
+            if ~exist('params','var')
+                params = containers.Map() ;
+            end
+            response = self.list_(self.model_url,params) ;
+        end
+        
+        function ok = check_model_id(resource)
+            resource = get_res_id(resource) ;
+            ok = ~isempty(regexp(resource,self.MODEL_RE,'once')) ;
+        end
+        
+        %%%%% Ensembles %%%%%%%%%%
+        function response = create_ensemble(self,dataset,params)  
+            if ~exist('params','var')
+                params = containers.Map() ;
+            end
+            if iscell(dataset)
+                dataset_list = {} ;
+                for i = 1:length(dataset)
+                    dataset_list = [dataset_list, get_res_id(dataset{i})] ;
+                end
+                params('datasets') = dataset_list ;
+            else
+                params('dataset') = get_res_id(dataset) ;
+            end
+            response = self.urlpost_([self.ensemble_url,self.auth],params) ;
+        end
+        
+        function response = get_ensemble(self,ensemble)
+            response = self.get_resource_(ensemble) ;
+        end
+        
+        function ready = ensemble_is_ready(self,ensemble)
+            e = self.get_ensemble(ensemble) ;
+            ready = resource_is_ready(e) ;
+        end
+        
+        function response = update_ensemble(self,ensemble,params)
+            if ~exist('params','var')
+                params = containers.Map() ;
+            end
+            response = self.update_(ensemble,params) ;
+        end
+        
+        function response = delete_ensemble(self,ensemble)
+            response = self.delete_(ensemble) ;
+        end
+        
+        function response = list_ensembles(self,params)
+            if ~exist('params','var')
+                params = containers.Map() ;
+            end
+            response = self.list_(self.ensemble_url,params) ;
+        end
+        
+        function ok = check_ensemble_id(resource)
+            resource = get_res_id(resource) ;
+            ok = ~isempty(regexp(resource,self.ENSEMBLE_RE,'once')) ;
+        end
+                
+        %%%%%%%%%%%%%%%%% Predictions %%%%%%%%%%%%%
+        function response = create_prediction(self,model,input_data,params)
+            if ~exist('params','var')
+                params = containers.Map() ;
+            end
+            params('input_data') = input_data ;
+            params('model') = get_res_id(model) ;
+            response = self.urlpost_([self.prediction_url,self.auth],params) ;
+        end
+        
+        function response = get_prediction(self,prediction)
+            response = self.get_resource_(prediction) ;
+        end
+        
+        function ready = prediction_is_ready(self,prediction)
+            e = self.get_prediction(prediction) ;
+            ready = resource_is_ready(e) ;
+        end
+        
+        function response = update_prediction(self,prediction,params)
+            if ~exist('params','var')
+                params = containers.Map() ;
+            end
+            response = self.update_(prediction,params) ;
+        end
+        
+        function response = delete_prediction(self,prediction)
+            response = self.delete_(prediction) ;
+        end
+        
+        function response = list_predictions(self,params)
+            if ~exist('params','var')
+                params = containers.Map() ;
+            end
+            response = self.list_(self.prediction_url,params) ;
+        end
+        
+        function ok = check_prediction_id(resource)
+            resource = get_res_id(resource) ;
+            ok = ~isempty(regexp(resource,self.PREDICTION_RE,'once')) ;
+        end
+        
+        %%%%%%%%%%%%%%%%% Batch Predictions %%%%%%%%%%%%%%%
+        function response = create_batch_prediction(self,predictor,dataset,params)
+            if ~exist('params','var')
+                params = containers.Map() ;
+            end
+            
+            % handle multi-datasets
+            if iscell(dataset)
+                dataset_list = {} ;
+                for i = 1:length(dataset)
+                    dataset_list = [dataset_list, get_res_id(dataset{i})] ;
+                end
+                params('datasets') = dataset_list ;
+            else
+                params('dataset') = get_res_id(dataset) ;
+            end
+            
+            if self.check_model_id(predictor)
+                params('model') = get_res_id(predictor) ;
+            elseif self.check_ensemble_id(predictor) 
+                params('ensemble') = get_res_id(predictor) ;
+            else
+                error('Pass a valid model or ensemble ID as the predictor') ;
+            end
+            response = self.urlpost_([self.batch_prediction_url,self.auth],params) ;
+        end
+        
+        function response = get_batch_prediction(self,batch_prediction)
+            response = self.get_resource_(batch_prediction) ;
+        end
+        
+        function ready = batch_prediction_is_ready(self,batch_prediction)
+            e = self.get_batch_prediction(batch_prediction) ;
+            ready = resource_is_ready(e) ;
+        end
+        
+        function response = update_batch_prediction(self,batch_prediction,params)
+            if ~exist('params','var')
+                params = containers.Map() ;
+            end
+            response = self.update_(batch_prediction,params) ;
+        end
+        
+        function response = delete_batch_prediction(self,batch_prediction)
+            response = self.delete_(batch_prediction) ;
+        end
+        
+        function response = list_batch_predictions(self,params)
+            if ~exist('params','var')
+                params = containers.Map() ;
+            end
+            response = self.list_(self.batch_prediction_url,params) ;
+        end
+        
+        function ok = check_batch_prediction_id(resource)
+            resource = get_res_id(resource) ;
+            ok = ~isempty(regexp(resource,self.BATCHPREDICTION_RE,'once')) ;
+        end
+        
+        %%%%%%%%%%%%%%%%% Evaluations %%%%%%%%%%%%%
+        function response = create_evaluation(self,model,dataset,params)
+            if ~exist('params','var')
+                params = containers.Map() ;
+            end
+            
+            if iscell(dataset)
+                dataset_list = {} ;
+                for i = 1:length(dataset)
+                    dataset_list = [dataset_list, get_res_id(dataset{i})] ;
+                end
+                params('datasets') = dataset_list ;
+            else
+                params('dataset') = get_res_id(dataset) ;
+            end
+            params('model') = get_res_id(model) ;
+            response = self.urlpost_([self.evaluation_url,self.auth],params) ;
+        end
+        
+        function response = get_evaluation(self,evaluation)
+            response = self.get_resource_(evaluation) ;
+        end
+        
+        function ready = evaluation_is_ready(self,evaluation)
+            e = self.get_evaluation(evaluation) ;
+            ready = resource_is_ready(e) ;
+        end
+        
+        function response = update_evaluation(self,evaluation,params)
+            if ~exist('params','var')
+                params = containers.Map() ;
+            end
+            response = self.update_(evaluation,params) ;
+        end
+        
+        function response = delete_evaluation(self,evaluation)
+            response = self.delete_(evaluation) ;
+        end
+        
+        function response = list_evaluations(self,params)
+            if ~exist('params','var')
+                params = containers.Map() ;
+            end
+            response = self.list_(self.evaluation_url,params) ;
+        end
+        
+        function ok = check_evaluation_id(resource)
+            resource = get_res_id(resource) ;
+            ok = ~isempty(regexp(resource,self.EVALUATION_RE,'once')) ;
         end
     end
     
@@ -225,14 +569,59 @@ classdef BigML
                 end
             end
         end
+
     end
     
-    methods (Access = private)
-        function define_constants_(self)
+    methods (Access = protected)
+        function response = get_resource_(self,res)
+            res = get_res_id(res) ;
+            url = [self.url,res,self.auth] ;
+            response = parse_json(urlread2(url,'GET')) ;
+            response = response{1} ;
+        end
+        
+        function response = urlpost_(self,url,params)
+            body = jsonify(params) ;           
+            header = http_createHeader('Content-Type',...
+                'application/json;charset=utf-8') ;
+            response = urlread2(url,'POST',body,header) ;
+
+            response = parse_json(response) ;
+            response = response{1} ; 
+        end
+        
+        function response = update_(self,resource,params)
+            resource = get_res_id(resource) ;
+            url = [self.url,resource,self.auth] ;
+            
+            header = http_createHeader('Content-Type',...
+                'application/json;charset=utf-8') ;
+            body = jsonify(params) ;
+            response = parse_json(urlread2(url,'PUT',body,header)) ;
+        end
+        
+        function response = delete_(self,resource)
+            resource = get_res_id(resource) ;
+            url = [self.url,resource,self.auth] ;
+            response = urlread2(url,'DELETE') ;
+            if ~isempty(response)
+                response = parse_json(response) ;
+                response = response{1} ;
+            end
+        end
+        
+        function response = list_(self,url,params)
+            params = query_string(params) ;
+            url = [url,self.auth,';',params] ;
+            disp(url)
+            response = parse_json(urlread2(url,'GET')) ;
+            response = response{1} ;
         end
     end
     
 end
+
+%%%%%%%%%%%%%% Utility Functions %%%%%%%%%%%%%%%%%
 
 function res = get_res_id(r)
     if ischar(r)
@@ -244,6 +633,36 @@ end
 
 function ready = resource_is_ready(res)
    ready = (res.status.code == 5) ;
+end
+
+function s = query_string(params)
+    s = {} ;
+    if isstruct(params)
+        if length(params) > 1
+            warning('received structure array, using first element') ;
+            params = params(1) ;
+        end
+        names = fieldnames(params)' ;
+        for n = names
+            val = params.(n{1}) ;
+            if isnumeric(val)
+                val = num2str(val) ;
+            end
+            s = [s,n,val] ;
+        end
+    elseif isa(params,'containers.Map')
+        for k = params.keys()
+            key = k{1} ;
+            val = params(key) ;
+            if isnumeric(val)
+                val = num2str(val) ;
+            end
+            s = [s,key,val] ;
+        end
+    else
+        error('parameters should be a structure or a Map') ;
+    end
+    s = http_paramsToString(s) ;
 end
 
 function quoted = quotify(s,single)
@@ -277,11 +696,29 @@ function j = jsonify(val)
         j = num2str(val) ;
     elseif iscell(val)
         j = cell2json(val) ;
+    elseif isa(val,'containers.Map')
+        j = map2json(val) ;
     elseif isstruct(val) && length(val) == 1
         j = struct2json(val) ;
     else
         error('Unable to jsonify: ') ;
         disp(val) ;
+    end
+end
+
+function json = map2json(m)
+    % JSON-encode a Map object
+    json = '{' ;
+    keys = m.keys() ;
+    for i = 1:length(keys)
+        key = keys{i} ;
+        val = jsonify(m(key)) ;
+        json = [json,quotify(key),' : ',val] ;
+        if (i < length(keys))
+            json = [json,','];
+        else
+            json = [json,'}'] ;
+        end
     end
 end
 
