@@ -139,14 +139,15 @@ classdef BigML
            response = response{1} ;
         end
 
-        function response = create_remote_source(self,url,params)
-            if ~exist('params','var')
-                params = containers.Map() ;
-            end
+        function response = create_remote_source(self,url,par)
+           if (~exist('par','var'))   
+               params = containers.Map() ;
+           else
+               params = self.copy_map(par) ;
+           end
            params('remote') = url ;
            params('name') = url ;
            body = jsonify(params) ;
-           disp(body)
 
            header = http_createHeader('Content-Type',...
                'application/json;charset=utf-8') ;
@@ -157,9 +158,11 @@ classdef BigML
            response = response{1} ;
         end
 
-        function response = create_inline_source(self,data,params)
-            if ~exist('params','var')
-                params = containers.Map() ;
+        function response = create_inline_source(self,data,par)
+            if (~exist('par','var'))   
+               params = containers.Map() ;
+            else
+               params = self.copy_map(par) ;
             end
             csv_data = self.struct_to_csv(data) ;
             params('data') = csv_data ;
@@ -173,7 +176,7 @@ classdef BigML
             response = response{1} ;
         end
         
-        function ready = source_is_ready(self,source)
+        function [ready,source] = source_is_ready(self,source)
             source = self.get_source(source) ;
             ready = resource_is_ready(source) ;
         end
@@ -196,25 +199,21 @@ classdef BigML
             response = self.delete_(source) ;
         end
         
-        function ok = check_source_id(resource)
+        function ok = check_source_id(self,resource)
             resource = get_res_id(resource) ;
             ok = ~isempty(regexp(resource,self.SOURCE_RE,'once')) ;
         end
         
         %%%%%%%%%%% Datasets %%%%%%%%%%%%
-        function response = create_dataset(self,source,params)
-            if ~exist('params','var')
-                params = containers.Map() ;
+        function response = create_dataset(self,source,par)
+            if (~exist('par','var'))   
+               params = containers.Map() ;
+            else
+               params = self.copy_map(par) ;
             end
                       
             n = 0 ;
-            while ~self.source_is_ready(source) 
-                pause(self.timeout) ;
-                n = n + 1 ;
-                if n >= self.n_tries
-                    error('Source not available, maximum tries exceeded') ;
-                end
-            end
+            self.wait_ready(source,@self.source_is_ready)
                         
             src_res = get_res_id(source) ;
             params('source') = src_res ;
@@ -228,7 +227,7 @@ classdef BigML
             response = response{1} ;
         end
         
-        function ready = dataset_is_ready(self,dataset)
+        function [ready,dataset] = dataset_is_ready(self,dataset)
             dataset = self.get_dataset(dataset) ;
             ready = resource_is_ready(dataset) ;
         end
@@ -251,18 +250,22 @@ classdef BigML
             response = self.list_(self.dataset_url,params) ;
         end
         
-        function response = transform_dataset(self,dataset,params)
-            if ~exist('params','var')
-                params = containers.Map() ;
+        function response = transform_dataset(self,dataset,par)
+            if (~exist('par','var'))   
+               params = containers.Map() ;
+            else
+               params = self.copy_map(par) ;
             end
             res_id = get_res_id(dataset) ;
             params('origin_dataset') = res_id ;
             response = self.urlpost_([self.dataset_url,self.auth],params) ;   
         end
         
-        function response = create_multi_dataset(self,datasets,params)
-            if ~exist('params','var')
-                params = containers.Map() ;
+        function response = create_multi_dataset(self,datasets,par)
+            if (~exist('par','var'))   
+               params = containers.Map() ;
+            else
+               params = self.copy_map(par) ;
             end
             if ~iscell(datasets)
                 error('origin datasets must be a cell array') ;
@@ -276,24 +279,29 @@ classdef BigML
             response = self.urlpost_([self.dataset_url,self.auth],params) ;
         end
         
-        function ok = check_dataset_id(resource)
+        function ok = check_dataset_id(self,resource)
             resource = get_res_id(resource) ;
             ok = ~isempty(regexp(resource,self.DATASET_RE,'once')) ;
         end
         
         %%%%%%%% Models %%%%%%%%%%%%%
-        function response = create_model(self,dataset,params)
-            if ~exist('params','var')
-                params = containers.Map() ;
+        function response = create_model(self,dataset,par)
+            if (~exist('par','var'))   
+               params = containers.Map() ;
+            else
+               params = self.copy_map(par) ;
             end
             if iscell(dataset)
                     dataset_list = {} ;
                 for i = 1:length(dataset)
                     dataset_list = [dataset_list, get_res_id(dataset{i})] ;
+                    self.wait_ready(dataset{i},@self.dataset_is_ready)
                 end
                 params('datasets') = dataset_list ;
             else
                 params('dataset') = get_res_id(dataset) ;
+                n = 0 ;
+                self.wait_ready(dataset,@self.dataset_is_ready)
             end
             
             url = [self.model_url,self.auth] ;
@@ -311,6 +319,11 @@ classdef BigML
             response = self.delete_(model) ;
         end
         
+        function [ready,model] = model_is_ready(self,model)
+            model = self.get_model(model) ;
+            ready = resource_is_ready(model) ;
+        end
+        
         function response = update_model(self,model,params)
             if ~exist('params','var')
                 params = containers.Map() ;
@@ -325,24 +338,28 @@ classdef BigML
             response = self.list_(self.model_url,params) ;
         end
         
-        function ok = check_model_id(resource)
+        function ok = check_model_id(self,resource)
             resource = get_res_id(resource) ;
             ok = ~isempty(regexp(resource,self.MODEL_RE,'once')) ;
         end
         
         %%%%% Ensembles %%%%%%%%%%
-        function response = create_ensemble(self,dataset,params)  
-            if ~exist('params','var')
-                params = containers.Map() ;
+        function response = create_ensemble(self,dataset,par)  
+            if (~exist('par','var'))   
+               params = containers.Map() ;
+            else
+               params = self.copy_map(par) ;
             end
             if iscell(dataset)
                 dataset_list = {} ;
                 for i = 1:length(dataset)
                     dataset_list = [dataset_list, get_res_id(dataset{i})] ;
+                    self.wait_ready(dataset{i},@self.dataset_is_ready)
                 end
                 params('datasets') = dataset_list ;
             else
                 params('dataset') = get_res_id(dataset) ;
+                self.wait_ready(dataset,@self.dataset_is_ready)
             end
             response = self.urlpost_([self.ensemble_url,self.auth],params) ;
         end
@@ -351,7 +368,7 @@ classdef BigML
             response = self.get_resource_(ensemble) ;
         end
         
-        function ready = ensemble_is_ready(self,ensemble)
+        function [ready,e] = ensemble_is_ready(self,ensemble)
             e = self.get_ensemble(ensemble) ;
             ready = resource_is_ready(e) ;
         end
@@ -374,18 +391,21 @@ classdef BigML
             response = self.list_(self.ensemble_url,params) ;
         end
         
-        function ok = check_ensemble_id(resource)
+        function ok = check_ensemble_id(self,resource)
             resource = get_res_id(resource) ;
             ok = ~isempty(regexp(resource,self.ENSEMBLE_RE,'once')) ;
         end
                 
         %%%%%%%%%%%%%%%%% Predictions %%%%%%%%%%%%%
-        function response = create_prediction(self,model,input_data,params)
-            if ~exist('params','var')
-                params = containers.Map() ;
+        function response = create_prediction(self,model,input_data,par)
+            if (~exist('par','var'))   
+               params = containers.Map() ;
+            else
+               params = self.copy_map(par) ;
             end
             params('input_data') = input_data ;
             params('model') = get_res_id(model) ;
+            self.wait_ready(model,@self.model_is_ready) ;
             response = self.urlpost_([self.prediction_url,self.auth],params) ;
         end
         
@@ -393,7 +413,7 @@ classdef BigML
             response = self.get_resource_(prediction) ;
         end
         
-        function ready = prediction_is_ready(self,prediction)
+        function [ready,e] = prediction_is_ready(self,prediction)
             e = self.get_prediction(prediction) ;
             ready = resource_is_ready(e) ;
         end
@@ -416,15 +436,17 @@ classdef BigML
             response = self.list_(self.prediction_url,params) ;
         end
         
-        function ok = check_prediction_id(resource)
+        function ok = check_prediction_id(self,resource)
             resource = get_res_id(resource) ;
             ok = ~isempty(regexp(resource,self.PREDICTION_RE,'once')) ;
         end
         
         %%%%%%%%%%%%%%%%% Batch Predictions %%%%%%%%%%%%%%%
-        function response = create_batch_prediction(self,predictor,dataset,params)
-            if ~exist('params','var')
-                params = containers.Map() ;
+        function response = create_batch_prediction(self,predictor,dataset,par)
+            if (~exist('par','var'))   
+               params = containers.Map() ;
+            else
+               params = self.copy_map(par) ;
             end
             
             % handle multi-datasets
@@ -432,10 +454,12 @@ classdef BigML
                 dataset_list = {} ;
                 for i = 1:length(dataset)
                     dataset_list = [dataset_list, get_res_id(dataset{i})] ;
+                    self.wait_ready(dataset{i},@self.dataset_is_ready)
                 end
                 params('datasets') = dataset_list ;
             else
                 params('dataset') = get_res_id(dataset) ;
+                self.wait_ready(dataset,@self.dataset_is_ready)
             end
             
             if self.check_model_id(predictor)
@@ -452,7 +476,7 @@ classdef BigML
             response = self.get_resource_(batch_prediction) ;
         end
         
-        function ready = batch_prediction_is_ready(self,batch_prediction)
+        function [ready,e] = batch_prediction_is_ready(self,batch_prediction)
             e = self.get_batch_prediction(batch_prediction) ;
             ready = resource_is_ready(e) ;
         end
@@ -475,25 +499,35 @@ classdef BigML
             response = self.list_(self.batch_prediction_url,params) ;
         end
         
-        function ok = check_batch_prediction_id(resource)
+        function ok = check_batch_prediction_id(self,resource)
             resource = get_res_id(resource) ;
             ok = ~isempty(regexp(resource,self.BATCHPREDICTION_RE,'once')) ;
         end
         
+        function status = fetch_batch_prediction(self,batch_prediction,filename)
+            res = get_res_id(batch_prediction) ;
+            url = [self.url,res,'/download',self.auth] ;
+            [~,status] = urlwrite(url,filename) ;
+        end
+        
         %%%%%%%%%%%%%%%%% Evaluations %%%%%%%%%%%%%
-        function response = create_evaluation(self,model,dataset,params)
-            if ~exist('params','var')
-                params = containers.Map() ;
+        function response = create_evaluation(self,model,dataset,par)
+            if (~exist('par','var'))   
+               params = containers.Map() ;
+            else
+               params = self.copy_map(par) ;
             end
             
             if iscell(dataset)
                 dataset_list = {} ;
                 for i = 1:length(dataset)
                     dataset_list = [dataset_list, get_res_id(dataset{i})] ;
+                    self.wait_ready(dataset{i},@self.dataset_is_ready)
                 end
                 params('datasets') = dataset_list ;
             else
                 params('dataset') = get_res_id(dataset) ;
+                self.wait_ready(dataset,@self.dataset_is_ready)
             end
             params('model') = get_res_id(model) ;
             response = self.urlpost_([self.evaluation_url,self.auth],params) ;
@@ -503,7 +537,7 @@ classdef BigML
             response = self.get_resource_(evaluation) ;
         end
         
-        function ready = evaluation_is_ready(self,evaluation)
+        function [ready,e] = evaluation_is_ready(self,evaluation)
             e = self.get_evaluation(evaluation) ;
             ready = resource_is_ready(e) ;
         end
@@ -526,9 +560,43 @@ classdef BigML
             response = self.list_(self.evaluation_url,params) ;
         end
         
-        function ok = check_evaluation_id(resource)
+        function ok = check_evaluation_id(self,resource)
             resource = get_res_id(resource) ;
             ok = ~isempty(regexp(resource,self.EVALUATION_RE,'once')) ;
+        end
+        
+        %%%%%%%%%%%%% Other functions %%%%%%%%%%%%
+        
+        function res = wait_ready(self,resource,wait_func)
+            if (nargin == 2)
+                if self.check_source_id(resource)
+                    wait_func = @self.source_is_ready ;
+                elseif self.check_dataset_id(resource)
+                    wait_func = @self.dataset_is_ready ;
+                elseif self.check_model_id(resource)
+                    wait_func = @self.model_is_ready ;
+                elseif self.check_ensemble_id(resource)
+                    wait_func = @self.ensemble_is_ready ;
+                elseif self.check_prediction_id(resource)
+                    wait_func = @self.prediction_is_ready ;
+                elseif self.check_batch_prediction_id(resource)
+                    wait_func = @self.batch_prediction_is_ready ;
+                elseif self.check_evaluation_id(resource)
+                    wait_func = @self.evaluation_is_ready ;
+                else
+                    error('Unrecognized resource ID') ;
+                end
+            end
+            n = 0 ;
+            [ready,res] = wait_func(resource) ;
+            while ~ready
+                [ready,res] = wait_func(resource) ;
+                pause(self.timeout) ;
+                n = n + 1 ;
+                if n >= self.n_tries
+                    error('Resource not available, maximum tries exceeded') ;
+                end
+            end
         end
     end
     
@@ -569,7 +637,21 @@ classdef BigML
                 end
             end
         end
-
+        
+        function new =  copy_map(old)
+            % because containers.Map is a handle class, API functions need to make
+            % a local copy of the params before modifying them.
+            new = containers.Map(old.keys,old.values) ;
+        end
+        
+        function val = get_nested(m,keys)
+            val = m(keys{1}) ;
+            keys(1) = [] ;
+            while ~isempty(keys)
+                val = val(keys{1}) ;
+                keys(1) = [] ;
+            end
+        end
     end
     
     methods (Access = protected)
@@ -617,6 +699,8 @@ classdef BigML
             response = parse_json(urlread2(url,'GET')) ;
             response = response{1} ;
         end
+        
+        
     end
     
 end
@@ -626,13 +710,14 @@ end
 function res = get_res_id(r)
     if ischar(r)
         res = r ;
-    elseif isstruct(r)
-        res = r.resource ;
+    elseif isa(r,'containers.Map')
+        res = r('resource') ;
     end
 end
 
 function ready = resource_is_ready(res)
-   ready = (res.status.code == 5) ;
+   status = res('status') ;
+   ready = (status('code') == 5) ;
 end
 
 function s = query_string(params)
