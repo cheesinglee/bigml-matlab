@@ -1,4 +1,4 @@
-function [data json] = parse_json(json)
+function [data json] = parse_json_to_map(json)
 % [DATA JSON] = PARSE_JSON(json)
 % This function parses a JSON string and returns a cell array with the
 % parsed data. JSON objects are converted to structures and JSON arrays are
@@ -79,7 +79,7 @@ function [data json] = parse_array(json)
         
         [value json] = parse_value(json);
         
-        if isempty(value)
+        if (isempty(value) && ~ischar(value)) % accept empty string
             ME = MException('json:parse_array',['Parsed an empty value: ' json]);
             ME.throw;
         end
@@ -92,7 +92,7 @@ function [data json] = parse_array(json)
 end
 
 function [data json] = parse_object(json)
-    data = [];
+    data = containers.Map();
     while ~isempty(json)
         id = json(1);
         json(1) = [];
@@ -103,15 +103,8 @@ function [data json] = parse_object(json)
                 if isempty(name)
                     ME = MException('json:parse_object',['Can not have an empty name: ' json]);
                     ME.throw;
-                end
-                
-                % fix invalid field names, e.g. all numeric names
-                try
-                    data.(name) = value;
-                catch
-                    name = ['field_',name] ;
-                    data.(name) = value ;
-                end
+                end                
+                data(name) = value ;
                 
                 json = remaining_json;
                 
@@ -168,6 +161,9 @@ function [string json] = parse_string(json)
                 end
                 
             case '"' % Done with the string
+                if isempty(string)
+                    string = '' ;
+                end
                 return
                 
             otherwise

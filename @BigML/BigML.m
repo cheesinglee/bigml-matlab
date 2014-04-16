@@ -122,20 +122,33 @@ classdef BigML
         function response = get_source(self,source)
             res = get_res_id(source) ;
             url = [self.url,res,self.auth] ;
-            response = parse_json(urlread2(url,'GET')) ;
+            response = parse_json_to_map(urlread2(url,'GET')) ;
             response = response{1} ;
         end
         
-        function response = create_local_source(self,file_name)
+        function response = create_local_source(self,file_name,par)
+           if (~exist('par','var'))   
+               params = containers.Map() ;
+           else
+               params = self.copy_map(par) ;
+           end
+           
            % read binary data from file
            f = fopen(file_name) ;
            d = fread(f,inf,'*uint8') ;
            fclose(f) ;
+           
+           body = {'name',file_name,'filename',file_name,'data',d} ;
+           keys = params.keys ;
+           for i = 1:length(keys) 
+               k = keys{i} ;
+               val = jsonify(params(k)) ;
+               body = [body k val] ;
+           end               
 
-           response = urlreadpost([self.source_url,self.auth],...
-               {'name',file_name,'filename',file_name,'data',d}) ;
+           response = urlreadpost([self.source_url,self.auth],body) ;
 
-           response = parse_json(response) ;
+           response = parse_json_to_map(response) ;
            response = response{1} ;
         end
 
@@ -154,7 +167,7 @@ classdef BigML
 
            response = urlread2([self.source_url,self.auth],'POST',body,header) ;
 
-           response = parse_json(response) ;
+           response = parse_json_to_map(response) ;
            response = response{1} ;
         end
 
@@ -172,7 +185,7 @@ classdef BigML
               'application/json;charset=utf-8') ;
             response = urlread2([self.source_url,self.auth],'POST',body,header) ;
 
-            response = parse_json(response) ;
+            response = parse_json_to_map(response) ;
             response = response{1} ;
         end
         
@@ -213,7 +226,7 @@ classdef BigML
             end
                       
             n = 0 ;
-            self.wait_ready(source,@self.source_is_ready)
+            self.wait_ready(source,@self.source_is_ready) ;
                         
             src_res = get_res_id(source) ;
             params('source') = src_res ;
@@ -223,7 +236,7 @@ classdef BigML
         function response = get_dataset(self,dataset)
             res = get_res_id(dataset) ;
             url = [self.url,res,self.auth] ;
-            response = parse_json(urlread2(url,'GET')) ;
+            response = parse_json_to_map(urlread2(url,'GET')) ;
             response = response{1} ;
         end
         
@@ -295,13 +308,13 @@ classdef BigML
                     dataset_list = {} ;
                 for i = 1:length(dataset)
                     dataset_list = [dataset_list, get_res_id(dataset{i})] ;
-                    self.wait_ready(dataset{i},@self.dataset_is_ready)
+                    self.wait_ready(dataset{i},@self.dataset_is_ready) ;
                 end
                 params('datasets') = dataset_list ;
             else
                 params('dataset') = get_res_id(dataset) ;
                 n = 0 ;
-                self.wait_ready(dataset,@self.dataset_is_ready)
+                self.wait_ready(dataset,@self.dataset_is_ready) ;
             end
             
             url = [self.model_url,self.auth] ;
@@ -311,7 +324,7 @@ classdef BigML
         function response = get_model(self,model)
             res = get_res_id(model) ;
             url = [self.url,res,self.auth] ;
-            response = parse_json(urlread2(url,'GET')) ;
+            response = parse_json_to_map(urlread2(url,'GET')) ;
             response = response{1} ;
         end
         
@@ -354,12 +367,12 @@ classdef BigML
                 dataset_list = {} ;
                 for i = 1:length(dataset)
                     dataset_list = [dataset_list, get_res_id(dataset{i})] ;
-                    self.wait_ready(dataset{i},@self.dataset_is_ready)
+                    self.wait_ready(dataset{i},@self.dataset_is_ready) ;
                 end
                 params('datasets') = dataset_list ;
             else
                 params('dataset') = get_res_id(dataset) ;
-                self.wait_ready(dataset,@self.dataset_is_ready)
+                self.wait_ready(dataset,@self.dataset_is_ready) ;
             end
             response = self.urlpost_([self.ensemble_url,self.auth],params) ;
         end
@@ -454,12 +467,12 @@ classdef BigML
                 dataset_list = {} ;
                 for i = 1:length(dataset)
                     dataset_list = [dataset_list, get_res_id(dataset{i})] ;
-                    self.wait_ready(dataset{i},@self.dataset_is_ready)
+                    self.wait_ready(dataset{i},@self.dataset_is_ready) ;
                 end
                 params('datasets') = dataset_list ;
             else
                 params('dataset') = get_res_id(dataset) ;
-                self.wait_ready(dataset,@self.dataset_is_ready)
+                self.wait_ready(dataset,@self.dataset_is_ready) ;
             end
             
             if self.check_model_id(predictor)
@@ -522,12 +535,12 @@ classdef BigML
                 dataset_list = {} ;
                 for i = 1:length(dataset)
                     dataset_list = [dataset_list, get_res_id(dataset{i})] ;
-                    self.wait_ready(dataset{i},@self.dataset_is_ready)
+                    self.wait_ready(dataset{i},@self.dataset_is_ready) ;
                 end
                 params('datasets') = dataset_list ;
             else
                 params('dataset') = get_res_id(dataset) ;
-                self.wait_ready(dataset,@self.dataset_is_ready)
+                self.wait_ready(dataset,@self.dataset_is_ready) ;
             end
             params('model') = get_res_id(model) ;
             response = self.urlpost_([self.evaluation_url,self.auth],params) ;
@@ -658,7 +671,7 @@ classdef BigML
         function response = get_resource_(self,res)
             res = get_res_id(res) ;
             url = [self.url,res,self.auth] ;
-            response = parse_json(urlread2(url,'GET')) ;
+            response = parse_json_to_map(urlread2(url,'GET')) ;
             response = response{1} ;
         end
         
@@ -668,7 +681,7 @@ classdef BigML
                 'application/json;charset=utf-8') ;
             response = urlread2(url,'POST',body,header) ;
 
-            response = parse_json(response) ;
+            response = parse_json_to_map(response) ;
             response = response{1} ; 
         end
         
@@ -679,7 +692,7 @@ classdef BigML
             header = http_createHeader('Content-Type',...
                 'application/json;charset=utf-8') ;
             body = jsonify(params) ;
-            response = parse_json(urlread2(url,'PUT',body,header)) ;
+            response = parse_json_to_map(urlread2(url,'PUT',body,header)) ;
         end
         
         function response = delete_(self,resource)
@@ -687,7 +700,7 @@ classdef BigML
             url = [self.url,resource,self.auth] ;
             response = urlread2(url,'DELETE') ;
             if ~isempty(response)
-                response = parse_json(response) ;
+                response = parse_json_to_map(response) ;
                 response = response{1} ;
             end
         end
@@ -695,8 +708,7 @@ classdef BigML
         function response = list_(self,url,params)
             params = query_string(params) ;
             url = [url,self.auth,';',params] ;
-            disp(url)
-            response = parse_json(urlread2(url,'GET')) ;
+            response = parse_json_to_map(urlread2(url,'GET')) ;
             response = response{1} ;
         end
         
@@ -721,6 +733,7 @@ function ready = resource_is_ready(res)
 end
 
 function s = query_string(params)
+    % create GET query arguments
     s = {} ;
     if isstruct(params)
         if length(params) > 1
@@ -842,4 +855,6 @@ function json = struct2json(structure)
 %         end
 %     end
 end
+
+
 
